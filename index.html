@@ -1,0 +1,190 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>URL Safety Checker</title>
+    <script src="https://cdn.tailwindcss.com"></script>
+    <link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700&display=swap" rel="stylesheet">
+    <style>
+        body {
+            font-family: 'Inter', sans-serif;
+        }
+    </style>
+</head>
+<body class="bg-gray-100 dark:bg-gray-900 text-gray-900 dark:text-gray-100 flex items-center justify-center min-h-screen py-8">
+
+    <div class="w-full max-w-xl mx-auto p-6 md:p-8 bg-white dark:bg-gray-800 rounded-2xl shadow-2xl">
+        
+        <!-- Header Section -->
+        <div class="text-center mb-8">
+            <img src="https://upload.wikimedia.org/wikipedia/commons/thumb/e/e4/Omantel_Logo.png/1600px-Omantel_Logo.png" alt="Omantel Logo" class="h-12 mx-auto mb-4">
+            <h1 class="text-3xl font-bold">URL Safety Checker</h1>
+            <p class="text-gray-500 dark:text-gray-400 mt-2">Check if a URL is on Google's unsafe lists.</p>
+        </div>
+
+        <!-- URL Input and Check Button -->
+        <div class="flex flex-col sm:flex-row gap-4 mb-6">
+            <input type="url" id="urlInput" placeholder="example.com" class="flex-grow w-full px-4 py-3 bg-gray-50 dark:bg-gray-700 border border-gray-300 dark:border-gray-600 rounded-lg focus:ring-4 focus:ring-blue-500/50 focus:border-blue-500 outline-none transition-all duration-300">
+            <button id="checkButton" class="w-full sm:w-auto bg-blue-600 hover:bg-blue-700 text-white font-semibold py-3 px-6 rounded-lg shadow-md hover:shadow-lg transition-all duration-300 flex items-center justify-center">
+                <span id="button-text">Check URL</span>
+                <svg id="spinner" class="animate-spin -ml-1 mr-3 h-5 w-5 text-white hidden" xmlns="http://www.w3.org/2000/svg" fill="none" viewBox="0 0 24 24">
+                    <circle class="opacity-25" cx="12" cy="12" r="10" stroke="currentColor" stroke-width="4"></circle>
+                    <path class="opacity-75" fill="currentColor" d="M4 12a8 8 0 018-8V0C5.373 0 0 5.373 0 12h4zm2 5.291A7.962 7.962 0 014 12H0c0 3.042 1.135 5.824 3 7.938l3-2.647z"></path>
+                </svg>
+            </button>
+        </div>
+
+        <!-- Results Display -->
+        <div id="result" class="hidden space-y-4"></div>
+    </div>
+
+    <script>
+        // Get references to the DOM elements
+        const urlInput = document.getElementById('urlInput');
+        const checkButton = document.getElementById('checkButton');
+        const resultDiv = document.getElementById('result');
+        const buttonText = document.getElementById('button-text');
+        const spinner = document.getElementById('spinner');
+
+        // Add event listener to the check button
+        checkButton.addEventListener('click', checkUrl);
+        
+        // Add event listener for Enter key on URL input
+        urlInput.addEventListener('keypress', function(event) {
+            if (event.key === 'Enter') {
+                checkUrl();
+            }
+        });
+
+        /**
+         * Main function to coordinate the API calls.
+         */
+        async function checkUrl() {
+            let urlToCheck = urlInput.value.trim();
+            
+            // Clear previous results and hide the result div
+            resultDiv.innerHTML = '';
+            resultDiv.className = 'hidden space-y-4';
+
+            if (!urlToCheck) {
+                displayError('Please enter a URL to check.');
+                return;
+            }
+            
+            // Prepend https:// if no protocol is present
+            if (!/^https?:\/\//i.test(urlToCheck)) {
+                urlToCheck = 'https://' + urlToCheck;
+            }
+
+            if (!isValidUrl(urlToCheck)) {
+                displayError('Please enter a valid URL (e.g., example.com).');
+                return;
+            }
+            
+            setLoading(true);
+
+            try {
+                const safetyData = await checkUrlSafety(urlToCheck);
+                displayResults(safetyData);
+            } catch (error) {
+                console.error('Safe Browsing API Error:', error);
+                displayError(`Safe Browsing Check Failed: ${error.message}`);
+            } finally {
+                setLoading(false);
+            }
+        }
+
+        /**
+         * Fetches safety info from Google Safe Browsing API.
+         * @param {string} url - The URL to check.
+         * @returns {Promise<object>} - A promise that resolves with safety data.
+         */
+        async function checkUrlSafety(url) {
+            const apiKey = 'AIzaSyD62sK9YGqV7ghFrE4asEs14jZ20EB1fYU';
+            const apiUrl = `https://safebrowsing.googleapis.com/v4/threatMatches:find?key=${apiKey}`;
+            const requestBody = {
+                client: { clientId: "my-url-checker-app", clientVersion: "1.0.0" },
+                threatInfo: {
+                    threatTypes: ["MALWARE", "SOCIAL_ENGINEERING", "UNWANTED_SOFTWARE", "POTENTIALLY_HARMFUL_APPLICATION"],
+                    platformTypes: ["ANY_PLATFORM"],
+                    threatEntryTypes: ["URL"],
+                    threatEntries: [{ url: url }]
+                }
+            };
+
+            const response = await fetch(apiUrl, {
+                method: 'POST',
+                headers: { 'Content-Type': 'application/json' },
+                body: JSON.stringify(requestBody)
+            });
+
+            if (!response.ok) {
+                const errorData = await response.json();
+                throw new Error(errorData.error.message || `HTTP error! Status: ${response.status}`);
+            }
+
+            const data = await response.json();
+            
+            if (data.matches && data.matches.length > 0) {
+                return { isSafe: false, details: data.matches[0] };
+            } else {
+                return { isSafe: true, details: null };
+            }
+        }
+
+        /**
+         * Displays all results in the UI.
+         * @param {object} safetyData - The result from the Safe Browsing API.
+         */
+        function displayResults(safetyData) {
+            let safetyContent = '';
+            let safetyClasses = '';
+
+            // Create safety result card
+            if (safetyData.isSafe) {
+                safetyClasses = 'bg-green-100 dark:bg-green-900/50 text-green-800 dark:text-green-200';
+                safetyContent = `<div class="text-center font-medium"><strong>Safe!</strong> The URL is not on Google's unsafe lists.</div>`;
+            } else {
+                safetyClasses = 'bg-red-100 dark:bg-red-900/50 text-red-800 dark:text-red-200';
+                const { threatType, platformType, cacheDuration } = safetyData.details;
+                safetyContent = `
+                    <div class="text-center font-bold text-lg mb-3">Warning! This URL is flagged as unsafe.</div>
+                    <div class="text-left space-y-2 bg-red-50 dark:bg-red-900/30 p-3 rounded-md">
+                       <p><strong>Threat Type:</strong> <span class="font-mono p-1 bg-red-200/50 dark:bg-red-800/50 rounded text-xs">${threatType.replace(/_/g, ' ')}</span></p>
+                       <p><strong>Affected Platform:</strong> <span class="font-mono p-1 bg-red-200/50 dark:bg-red-800/50 rounded text-xs">${platformType.replace(/_/g, ' ')}</span></p>
+                       <p><strong>Cache Duration:</strong> <span class="font-mono p-1 bg-red-200/50 dark:bg-red-800/50 rounded text-xs">${cacheDuration}</span></p>
+                    </div>
+                `;
+            }
+            
+            resultDiv.innerHTML = `<div class="p-4 rounded-lg text-sm ${safetyClasses}">${safetyContent}</div>`;
+            resultDiv.className = 'space-y-4';
+        }
+        
+        /**
+         * Displays an error message.
+         * @param {string} message - The error message to display.
+         */
+        function displayError(message) {
+            resultDiv.innerHTML = `<div class="p-4 rounded-lg text-sm bg-yellow-100 dark:bg-yellow-900/50 text-yellow-800 dark:text-yellow-200 text-center font-medium">${message}</div>`;
+            resultDiv.className = 'space-y-4';
+        }
+
+        function setLoading(isLoading) {
+            checkButton.disabled = isLoading;
+            buttonText.classList.toggle('hidden', isLoading);
+            spinner.classList.toggle('hidden', !isLoading);
+        }
+
+        function isValidUrl(string) {
+            try {
+                new URL(string);
+                return true;
+            } catch (_) {
+                return false;
+            }
+        }
+    </script>
+</body>
+</html>
